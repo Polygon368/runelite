@@ -25,13 +25,15 @@
  */
 package net.runelite.client.plugins.agility;
 
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.Graphics2D;
-import java.awt.Polygon;
-import java.awt.Shape;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.FileNotFoundException;
+import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Consumer;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
@@ -39,11 +41,15 @@ import net.runelite.api.Point;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.game.AgilityShortcut;
+import net.runelite.client.ui.DrawManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.OverlayUtil;
 import net.runelite.client.util.ColorUtil;
+import net.runelite.client.util.ImageCapture;
+import net.runelite.client.util.ImageUtil;
+
 
 class AgilityOverlay extends Overlay
 {
@@ -53,6 +59,17 @@ class AgilityOverlay extends Overlay
 	private final Client client;
 	private final AgilityPlugin plugin;
 	private final AgilityConfig config;
+
+	@Inject
+	private DrawManager drawManager;
+
+	@Inject
+	private ScheduledExecutorService executor;
+
+	@Inject
+	private ImageCapture imageCapture;
+
+	private double last_time = 0;
 
 	@Inject
 	private AgilityOverlay(Client client, AgilityPlugin plugin, AgilityConfig config)
@@ -68,6 +85,22 @@ class AgilityOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		graphics.setColor(Color.GREEN);
+		for (NPC npc : client.getNpcs())
+		{
+			if (npc.getName().equals("Goblin") && npc.getWorldLocation().distanceTo(client.getLocalPlayer().getWorldLocation()) < 4) {
+
+				Rectangle r = npc.getConvexHull().getBounds();
+				Rectangle game = new Rectangle(client.getViewportXOffset(), client.getViewportYOffset(),
+						client.getViewportWidth(), client.getViewportHeight());
+
+				if(game.contains(r)) {
+					//graphics.drawRect(r.x, r.y, r.width, r.height);
+				}
+				break;
+			}
+		}
+
 		LocalPoint playerLocation = client.getLocalPlayer().getLocalLocation();
 		Point mousePosition = client.getMouseCanvasPosition();
 		final List<Tile> marksOfGrace = plugin.getMarksOfGrace();
@@ -163,7 +196,57 @@ class AgilityOverlay extends Overlay
 			}
 		}
 
+		double t = System.currentTimeMillis();
+		if(System.currentTimeMillis() - last_time > 1000) {
+			Consumer<Image> imageCallback = (img) ->
+			{
+				executor.submit(() -> saveScreenshot("test_" + t,"Shots", img));
+
+				PrintWriter writer = null;
+				try {
+					writer = new PrintWriter("/Users/luka/.runelite/screenshots/Deltazan/Shots/goblins_" + t + ".txt", "UTF-8");
+
+					for (NPC npc : client.getNpcs())
+					{
+						if (npc.getName().equals("Goblin") && npc.getWorldLocation().distanceTo(client.getLocalPlayer().getWorldLocation()) < 8) {
+
+							Rectangle r = npc.getConvexHull().getBounds();
+							Rectangle game = new Rectangle(client.getViewportXOffset(), client.getViewportYOffset(),
+									client.getViewportWidth(), client.getViewportHeight());
+
+							if(game.contains(r)) {
+								graphics.drawRect(r.x, r.y, r.width, r.height);
+
+								writer.print("[" + r.x + "," + r.y + "," + r.width + "," + r.height + "],");
+
+							}
+
+						}
+					}
+
+					writer.close();
+				} catch (FileNotFoundException e) {
+					throw new RuntimeException(e);
+				} catch (UnsupportedEncodingException e) {
+					throw new RuntimeException(e);
+				}
+
+			};
+
+			drawManager.requestNextFrameListener(imageCallback);
+
+			System.gc();
+			last_time = t;
+		}
+
 		return null;
+	}
+
+	private void saveScreenshot(String fileName, String subDir, Image image)
+	{
+		final BufferedImage screenshot;
+		screenshot = imageCapture.addClientFrame(image);
+		imageCapture.saveScreenshot(screenshot, fileName, subDir, false, false);
 	}
 
 	private void highlightTile(Graphics2D graphics, LocalPoint playerLocation, Tile tile, Color color)
